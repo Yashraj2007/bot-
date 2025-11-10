@@ -1,0 +1,21 @@
+{
+  "name": "elite-coding-assistant-bot",
+  "version": "2.0.0",
+  "description": "Elite coding assistant bot for developers",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
+  "keywords": ["telegram", "coding", "ai", "assistant", "developer"],
+  "author": "Yashraj Chavan",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "node-telegram-bot-api": "^0.64.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
