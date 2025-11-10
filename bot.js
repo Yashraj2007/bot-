@@ -1,31 +1,74 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const express = require('express');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = process.env.WEBHOOK_URL; // Optional: for webhook mode
 
 const conversations = new Map();
 const userProfiles = new Map();
 const userMoods = new Map();
 const lastMessageTime = new Map();
 
-console.log('💬 Real friend bot v2 - Auto-fallback enabled\n');
+// Create Express app for health check
+const app = express();
+app.use(express.json());
 
-// Best FREE models in order (top to bottom)
+// Health check endpoint (required for most deployment platforms)
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'Bot is running! 🤖',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', bot: 'online' });
+});
+
+// Initialize bot
+let bot;
+if (WEBHOOK_URL) {
+  // Webhook mode (for production deployment)
+  bot = new TelegramBot(TELEGRAM_TOKEN);
+  bot.setWebHook(`${WEBHOOK_URL}/bot${TELEGRAM_TOKEN}`);
+  
+  // Webhook endpoint
+  app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+  });
+  
+  console.log('🌐 Bot running in WEBHOOK mode');
+} else {
+  // Polling mode (for local development)
+  bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+  console.log('🔄 Bot running in POLLING mode');
+}
+
+// Start Express server
+app.listen(PORT, () => {
+  console.log(`💬 Real friend bot v2 - Auto-fallback enabled`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Health check: http://localhost:${PORT}\n`);
+});
+
+// Best FREE models in order
 const FREE_MODELS = [
-  'kwaipilot/kat-coder-pro:free',              // 1. Kat Coder - 256K context
-  'openrouter/polaris-alpha',                  // 2. Polaris Alpha - 256K
-  'minimax/minimax-m2:free',                   // 3. MiniMax M2 - 196K
-  'deepseek/deepseek-chat-v3.1:free',          // 4. DeepSeek V3.1 - 163K
-  'qwen/qwen3-coder:free',                     // 5. Qwen3 Coder - 262K
-  'moonshotai/kimi-k2:free',                   // 6. Kimi K2 - 32K
-  'google/gemini-2.0-flash-exp:free',          // 7. Gemini 2.0 - 1M
-  'meta-llama/llama-3.3-70b-instruct:free',    // 8. Llama 3.3 70B - 131K
-  'deepseek/deepseek-r1:free',                 // 9. DeepSeek R1 - 163K
-  'qwen/qwen-2.5-72b-instruct:free',           // 10. Qwen 2.5 72B - 32K
+  'kwaipilot/kat-coder-pro:free',
+  'openrouter/polaris-alpha',
+  'minimax/minimax-m2:free',
+  'deepseek/deepseek-chat-v3.1:free',
+  'qwen/qwen3-coder:free',
+  'moonshotai/kimi-k2:free',
+  'google/gemini-2.0-flash-exp:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'deepseek/deepseek-r1:free',
+  'qwen/qwen-2.5-72b-instruct:free',
 ];
 
 let currentModelIndex = 0;
@@ -118,7 +161,6 @@ bot.on('message', async (msg) => {
       1000 + Math.random() * 2000;
     await sleep(delay);
     
-    // Try models with auto-fallback
     const reply = await getResponseWithFallback(history, name, extraContext, profile);
     
     if (!reply) {
@@ -128,7 +170,6 @@ bot.on('message', async (msg) => {
     const casualReply = makeCasual(reply);
     history.push({ role: 'assistant', content: casualReply });
     
-    // Random reaction
     if (Math.random() > 0.7 && casualReply.length > 30) {
       const reactions = ['lol', 'haha', 'damn', 'yo', '😂', 'bruh'];
       await bot.sendMessage(chatId, reactions[Math.floor(Math.random() * reactions.length)]);
@@ -152,7 +193,6 @@ bot.on('message', async (msg) => {
   }
 });
 
-// Auto-fallback through all models
 async function getResponseWithFallback(history, name, extraContext, profile) {
   for (let i = 0; i < FREE_MODELS.length; i++) {
     const model = FREE_MODELS[i];
@@ -186,7 +226,7 @@ async function getResponseWithFallback(history, name, extraContext, profile) {
       
       if (reply && reply.length > 0) {
         console.log(`✅ Success with ${model}`);
-        currentModelIndex = i; // Remember working model
+        currentModelIndex = i;
         return reply;
       }
       
@@ -194,18 +234,16 @@ async function getResponseWithFallback(history, name, extraContext, profile) {
       const status = error.response?.status;
       console.log(`❌ Model ${model} failed: ${status || error.message}`);
       
-      // If rate limited, try next model immediately
       if (status === 429) {
         console.log('⚠️ Rate limited, trying next model...');
         continue;
       }
       
-      // For other errors, wait a bit before next attempt
       await sleep(1000);
     }
   }
   
-  return null; // All models failed
+  return null;
 }
 
 function updateProfile(text, profile) {
@@ -283,7 +321,6 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Media handlers
 bot.on('voice', async (msg) => {
   await bot.sendChatAction(msg.chat.id, 'typing');
   await sleep(500);
@@ -317,8 +354,13 @@ bot.on('polling_error', (error) => {
   }
 });
 
+// Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\nbye');
-  bot.stopPolling();
+  if (WEBHOOK_URL) {
+    bot.deleteWebHook();
+  } else {
+    bot.stopPolling();
+  }
   process.exit(0);
 });
